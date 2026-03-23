@@ -89,6 +89,14 @@ wss.on("connection", (ws, req) => {
           // Forward to specific viewer only
           for (const v of room.viewers)
             if (v._username === msg.username) { send(v, msg); break; }
+        } else if (msg.type === "coinsSnapshot") {
+          // Send each viewer only their own coin balance extracted from the snapshot
+          for (const v of room.viewers) {
+            if (!v._username || !msg.coins) continue;
+            const coins = msg.coins[v._username];
+            if (coins !== undefined)
+              send(v, { type: "coinUpdate", username: v._username, coins });
+          }
         } else {
           broadcast(room.viewers, msg);
         }
