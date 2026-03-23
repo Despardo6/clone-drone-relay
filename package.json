@@ -1,0 +1,15 @@
+{
+  "name": "clone-drone-relay",
+  "version": "1.0.0",
+  "description": "WebSocket relay for Clone Drone Twitch Spawn Mod",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
