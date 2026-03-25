@@ -156,3 +156,27 @@ wss.on("connection", (ws, req) => {
 });
 
 httpServer.listen(PORT, () => console.log(`Clone Drone Relay on port ${PORT}`));
+
+// ── Keep-alive: prevent Railway free tier from sleeping ────────────────────
+// Railway sleeps dynos after ~30 min of no inbound HTTP traffic.
+// Self-pinging the health endpoint every 4 minutes keeps it awake.
+// Requires the RAILWAY_PUBLIC_DOMAIN env var — Railway sets this automatically
+// for public services. If it's not set, add it manually in Railway → Variables.
+const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  : null;
+
+if (SELF_URL) {
+  const https = require("https");
+  setInterval(() => {
+    https.get(SELF_URL, res => {
+      console.log(`[Keepalive] pinged ${SELF_URL} -> ${res.statusCode}`);
+    }).on("error", err => {
+      console.warn(`[Keepalive] ping failed: ${err.message}`);
+    });
+  }, 4 * 60 * 1000); // every 4 minutes
+  console.log(`[Keepalive] Enabled — will ping ${SELF_URL} every 4 min`);
+} else {
+  console.log("[Keepalive] RAILWAY_PUBLIC_DOMAIN not set — keepalive disabled.");
+  console.log("[Keepalive] Set it in Railway -> Variables to enable auto-ping.");
+}
