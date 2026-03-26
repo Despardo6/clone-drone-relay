@@ -1,15 +1,11 @@
 // Clone Drone Twitch Spawn Mod — Relay Server
 // Deploy to Railway: https://railway.app
-//
-// Rooms keyed by streamer Twitch username (lowercase).
-// Each room has ONE mod connection and N viewer connections.
 
 const http = require("http");
 const { WebSocketServer, WebSocket } = require("ws");
 
 const PORT = process.env.PORT || 8080;
 
-// rooms[channel] = { mod, viewers, lastState, lastConfig }
 const rooms = new Map();
 
 function getRoom(channel) {
@@ -36,7 +32,7 @@ function broadcast(viewers, obj) {
       try { v.send(msg); } catch {}
 }
 
-// ── HTTP (health check for Railway) ───────────────────────────
+// ── HTTP health check ──────────────────────────────────────────
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   let out = "Clone Drone Relay — OK\n\nRooms:\n";
@@ -58,7 +54,6 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  // Optional secret to prevent random mods connecting
   if (role === "mod") {
     const expected = process.env.RELAY_SECRET || "";
     if (expected && url.searchParams.get("secret") !== expected) {
@@ -70,7 +65,7 @@ wss.on("connection", (ws, req) => {
   const room = getRoom(channel);
   console.log(`[${channel}] ${role} connected`);
 
-  // ── MOD ──────────────────────────────────────────────────────
+  // ── MOD ───────────────────────────────────────────────────────
   if (role === "mod") {
     if (room.mod?.readyState === WebSocket.OPEN) room.mod.close(1000, "Replaced");
     room.mod = ws;
@@ -86,11 +81,10 @@ wss.on("connection", (ws, req) => {
           room.lastState = msg;
           broadcast(room.viewers, msg);
         } else if (msg.type === "coinUpdate" || msg.type === "response") {
-          // Forward to specific viewer only
+          // Forward to the specific viewer only
           for (const v of room.viewers)
             if (v._username === msg.username) { send(v, msg); break; }
         } else if (msg.type === "coinsSnapshot") {
-          // Send each viewer only their own coin balance extracted from the snapshot
           for (const v of room.viewers) {
             if (!v._username || !msg.coins) continue;
             const coins = msg.coins[v._username];
@@ -118,12 +112,11 @@ wss.on("connection", (ws, req) => {
   else {
     room.viewers.add(ws);
 
-    // Send current state immediately so viewer doesn't wait for next push
     send(ws, {
-      type:       "welcome",
+      type:         "welcome",
       hasActiveMod: room.mod?.readyState === WebSocket.OPEN,
-      lastConfig: room.lastConfig,
-      lastState:  room.lastState
+      lastConfig:   room.lastConfig,
+      lastState:    room.lastState
     });
 
     ws.on("message", raw => {
@@ -132,21 +125,39 @@ wss.on("connection", (ws, req) => {
 
         if (msg.type === "identify") {
           ws._username = (msg.username || "").toLowerCase();
-          // Ask mod to push this viewer's coin balance
           if (room.mod?.readyState === WebSocket.OPEN)
             send(room.mod, { type: "viewerJoined", username: ws._username });
           return;
         }
 
-        const allowed = ["spawn", "clone", "bettier", "betkiller"];
-        if (allowed.includes(msg.type)) {
+        // Normal viewer actions — forward to mod
+        const viewerAllowed = ["spawn", "clone", "bettier", "betkiller", "suggest"];
+        if (viewerAllowed.includes(msg.type)) {
           if (room.mod?.readyState === WebSocket.OPEN) {
             msg.username = ws._username || msg.username || "unknown";
             send(room.mod, msg);
           } else {
             send(ws, { type: "error", message: "Streamer is not in Twitch mode right now." });
           }
+          return;
         }
+
+        // Broadcaster-only command (give/set coins, etc.)
+        // Security: only the channel owner's viewer session can send this.
+        if (msg.type === "streamerCommand") {
+          if (!ws._username || ws._username !== channel) {
+            send(ws, { type: "error", message: "Only the broadcaster can use streamer commands." });
+            return;
+          }
+          if (room.mod?.readyState === WebSocket.OPEN) {
+            msg.username = ws._username;
+            send(room.mod, msg);
+          } else {
+            send(ws, { type: "error", message: "Mod is not connected." });
+          }
+          return;
+        }
+
       } catch {}
     });
 
@@ -157,11 +168,7 @@ wss.on("connection", (ws, req) => {
 
 httpServer.listen(PORT, () => console.log(`Clone Drone Relay on port ${PORT}`));
 
-// ── Keep-alive: prevent Railway free tier from sleeping ────────────────────
-// Railway sleeps dynos after ~30 min of no inbound HTTP traffic.
-// Self-pinging the health endpoint every 4 minutes keeps it awake.
-// Requires the RAILWAY_PUBLIC_DOMAIN env var — Railway sets this automatically
-// for public services. If it's not set, add it manually in Railway → Variables.
+// ── Keep-alive: prevent Railway free tier from sleeping ───────────────────
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
   : null;
@@ -174,7 +181,7 @@ if (SELF_URL) {
     }).on("error", err => {
       console.warn(`[Keepalive] ping failed: ${err.message}`);
     });
-  }, 4 * 60 * 1000); // every 4 minutes
+  }, 4 * 60 * 1000);
   console.log(`[Keepalive] Enabled — will ping ${SELF_URL} every 4 min`);
 } else {
   console.log("[Keepalive] RAILWAY_PUBLIC_DOMAIN not set — keepalive disabled.");
