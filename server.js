@@ -98,11 +98,17 @@ wss.on("connection", (ws, req) => {
     });
 
     ws.on("close", () => {
-      console.log(`[${channel}] Mod disconnected`);
-      room.mod = null;
-      room.lastState = null;
-      broadcast(room.viewers, { type: "modOffline" });
-      cleanupRoom(channel);
+      // ONLY clean up if the socket that is closing is the one we currently consider 'the mod'
+      if (room.mod === ws) {
+        console.log(`[${channel}] Active Mod disconnected`);
+        room.mod = null;
+        room.lastState = null;
+        broadcast(room.viewers, { type: "modOffline" });
+        cleanupRoom(channel);
+      } else {
+        // This was an old socket being cleaned up after a replacement
+        console.log(`[${channel}] Old mod socket closed (Replaced)`);
+      }
     });
 
     ws.on("error", err => console.error(`[${channel}] Mod error: ${err.message}`));
